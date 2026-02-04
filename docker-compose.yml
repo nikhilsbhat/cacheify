@@ -1,0 +1,34 @@
+services:
+  traefik:
+    image: traefik:v3.6
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--entrypoints.web.address=:80"
+      #- "--experimental.plugins.cacheify.moduleName=github.com/ciaranj/cacheify"
+      #- "--experimental.plugins.cacheify.version=v0.0.7"
+      - "--experimental.localPlugins.cacheify.modulename=github.com/ciaranj/cacheify"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/plugins-local/src/github.com/ciaranj/cacheify
+      
+  whoami:
+    image: traefik/whoami
+    labels:
+      - "traefik.http.routers.whoami.rule=Host(`whoami.localhost`)"
+      - "traefik.http.services.whoami.loadbalancer.server.port=80"
+
+  ws:
+    image: lscr.io/linuxserver/code-server:latest
+    labels:
+      - "traefik.http.routers.ws.rule=Host(`ws.localhost`)"
+      - "traefik.http.routers.ws.entrypoints=web"
+      - "traefik.http.routers.ws.middlewares=cacheify"  
+      - "traefik.http.services.ws.loadbalancer.server.port=80"
+      - "traefik.http.services.ws.loadbalancer.server.port=8443"      
+      - "traefik.http.middlewares.cacheify.plugin.cacheify.path=/tmp"
+
+ 

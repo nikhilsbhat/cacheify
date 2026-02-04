@@ -87,6 +87,54 @@ func TestCache_ServeHTTP(t *testing.T) {
 	}
 }
 
+func TestCache_WebSocketUpgradeBypass(t *testing.T) {
+	dir := createTempDir(t)
+
+	var nextReceivedWriter http.ResponseWriter
+
+	next := func(rw http.ResponseWriter, req *http.Request) {
+		nextReceivedWriter = rw
+		rw.WriteHeader(http.StatusSwitchingProtocols)
+	}
+
+	cfg := &Config{
+		Path:              dir,
+		MaxExpiry:         10,
+		Cleanup:           20,
+		AddStatusHeader:   true,
+		MaxHeaderPairs:    2,
+		MaxHeaderKeyLen:   30,
+		MaxHeaderValueLen: 100,
+	}
+
+	c, err := New(context.Background(), http.HandlerFunc(next), cfg, "cacheify")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://localhost/ws", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	rw := httptest.NewRecorder()
+
+	c.ServeHTTP(rw, req)
+
+	// The next handler must receive the original ResponseWriter directly,
+	// not our responseWriter wrapper — otherwise http.Hijacker will not be
+	// available and Traefik's proxy will fail with "not a hijacker".
+	if nextReceivedWriter != rw {
+		t.Error("upgrade request was not passed through: next handler did not receive the original ResponseWriter")
+	}
+
+	// No Cache-Status header should be set for upgrade requests
+	if state := rw.Header().Get("Cache-Status"); state != "" {
+		t.Errorf("unexpected Cache-Status header on upgrade request: %q", state)
+	}
+
+	// Nothing should have been written to the cache directory
+	verifyNoTempFiles(t, dir)
+}
+
 func TestCache_UpstreamFailureDuringStream(t *testing.T) {
 	dir := createTempDir(t)
 

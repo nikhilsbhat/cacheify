@@ -97,6 +97,15 @@ type cacheData struct {
 
 // ServeHTTP serves an HTTP request.
 func (m *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Bypass cache for protocol upgrade requests (e.g. WebSocket).
+	// These are long-lived bidirectional connections that cannot be cached,
+	// and the upgrade requires http.Hijacker support on the ResponseWriter
+	// which our responseWriter wrapper does not expose.
+	if r.Header.Get("Upgrade") != "" {
+		m.next.ServeHTTP(w, r)
+		return
+	}
+
 	cs := cacheMissStatus
 
 	key := cacheKey(r, m.cfg.QueryInKey)
