@@ -700,6 +700,7 @@ func keyPath(path, key string) string {
 type lockManager struct {
 	mu    sync.Mutex
 	locks map[string]*lockEntry
+	pool  sync.Pool
 }
 
 // lockEntry contains the actual RWMutex and reference count
@@ -717,9 +718,13 @@ type lockHandle struct {
 }
 
 func newLockManager() *lockManager {
-	return &lockManager{
+	lm := &lockManager{
 		locks: make(map[string]*lockEntry),
 	}
+	lm.pool.New = func() interface{} {
+		return &lockEntry{}
+	}
+	return lm
 }
 
 // getLock returns a lock handle for the given path
@@ -730,7 +735,8 @@ func (lm *lockManager) getLock(path string) lockHandle {
 
 	entry, exists := lm.locks[path]
 	if !exists {
-		entry = &lockEntry{ref: 0}
+		entry = lm.pool.Get().(*lockEntry)
+		entry.ref = 0
 		lm.locks[path] = entry
 	}
 	entry.ref++
@@ -752,6 +758,7 @@ func (lm *lockManager) releaseLock(path string) {
 	entry.ref--
 	if entry.ref == 0 {
 		delete(lm.locks, path)
+		lm.pool.Put(entry)
 	}
 }
 
