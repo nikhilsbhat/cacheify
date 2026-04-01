@@ -22,7 +22,7 @@ echo "Results will be saved to: ${BASELINE_FILE}"
 echo ""
 
 # Run all benchmarks with sufficient iterations
-go test -bench=. -benchmem -benchtime=5s -timeout=30m | tee "${BASELINE_FILE}"
+go test -bench=. -benchmem -count=6 -timeout=60m | tee "${BASELINE_FILE}"
 
 echo ""
 echo "=========================================="
@@ -34,7 +34,7 @@ echo ""
 echo "To compare with future optimizations:"
 echo "  1. Run this script now to capture baseline"
 echo "  2. Make your optimizations"
-echo "  3. Run: go test -bench=. -benchmem -benchtime=5s > optimized.txt"
+echo "  3. Run: go test -bench=. -benchmem -count 6 -timeout=60m > optimized.txt"
 echo "  4. Compare: benchstat ${BASELINE_FILE} optimized.txt"
 echo ""
 echo "Install benchstat if needed:"
