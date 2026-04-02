@@ -100,3 +100,15 @@ If true (the default) cacheify will remove any 'Set-Cookie' headers from any cac
 *Default: 30*
 
 The number of seconds to wait for another request to complete a cache update before timing out and fetching from upstream independently. This prevents requests from waiting indefinitely if an upstream server hangs during a cache miss. When multiple requests arrive for the same uncached resource, the first request fetches from upstream while subsequent requests wait for completion. If the timeout is exceeded, waiting requests will proceed to fetch from upstream themselves rather than block indefinitely.
+
+## Release History
+### v1.0.0
+#### Bugfixes
+* Downstream (traefik) disconnects & timeouts could lead to 0 byte bodies being cached
+* There was a memory leak identified in the lock management, the fix has incurred a minor performance penalty, but we are still largely IO bound.
+#### Breaking change notice
+This release introduces a potentially breaking change in behaviour. Prior to 1.0.0 there was a bug that meant responses that should be 'heuristically' cached, that is responses that don't explicitly decline caching behaviours but that should by default (according to the specification) be cached, were not being cached.
+
+This release changes the behaviour so that these default 'heuristically' cacheable responses will now be cached, the heuristic used is currently whatever you have set in your maxExpiry setting.
+
+This will likely result in a significantly higher number of responses being cached in v1.0.0 than previously and is not currently a configurable behaviour. If there is demand for that we can introduce it.
