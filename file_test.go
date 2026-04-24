@@ -66,6 +66,55 @@ func TestFileCache(t *testing.T) {
 	}
 }
 
+func TestFileCache_ExpiredEntry(t *testing.T) {
+	dir := createTempDir(t)
+
+	fc, err := newFileCache(dir, time.Second, 255, 100, 8192)
+	if err != nil {
+		t.Fatalf("unexpected newFileCache error: %v", err)
+	}
+	defer fc.Stop()
+
+	metadata := cacheMetadata{
+		Status: 200,
+		Headers: map[string][]string{
+			"Content-Type": {"text/plain"},
+		},
+	}
+
+	writer, err := fc.SetStream(testCacheKey, metadata, 100*time.Millisecond)
+	if err != nil {
+		t.Fatalf("unexpected cache set error: %v", err)
+	}
+	if _, err := writer.Write([]byte("expired")); err != nil {
+		t.Fatalf("unexpected write error: %v", err)
+	}
+	if err := writer.Commit(); err != nil {
+		t.Fatalf("unexpected commit error: %v", err)
+	}
+
+	time.Sleep(150 * time.Millisecond)
+
+	resp, err := fc.GetStream(testCacheKey)
+	if resp != nil {
+		resp.Body.Close()
+		t.Fatal("expected no cached response for expired entry")
+	}
+	if err == nil {
+		t.Fatal("expected errCacheExpired for expired entry")
+	}
+	if err != errCacheExpired {
+		t.Fatalf("expected errCacheExpired, got %v", err)
+	}
+
+	fc.lm.mu.Lock()
+	remaining := len(fc.lm.locks)
+	fc.lm.mu.Unlock()
+	if remaining != 0 {
+		t.Errorf("lockManager leaked %d entries after expired read, want 0", remaining)
+	}
+}
+
 func TestFileCache_ConcurrentAccess(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

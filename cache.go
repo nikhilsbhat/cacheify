@@ -46,10 +46,13 @@ func CreateConfig() *Config {
 }
 
 const (
-	cacheHeader      = "Cache-Status"
-	cacheHitStatus   = "hit"
-	cacheMissStatus  = "miss"
-	cacheErrorStatus = "error"
+	cacheHeader         = "Cache-Status"
+	cacheHitStatus      = "hit"
+	cacheMissStatus     = "miss"
+	cacheBypassStatus   = "bypass"
+	cacheExpiredStatus  = "expired"
+	cacheUpdatingStatus = "updating"
+	cacheErrorStatus    = "error"
 )
 
 type cache struct {
@@ -103,38 +106,24 @@ func (m *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// and the upgrade requires http.Hijacker support on the ResponseWriter
 	// which our responseWriter wrapper does not expose.
 	if r.Header.Get("Upgrade") != "" {
+		if m.cfg.AddStatusHeader {
+			w.Header().Set(cacheHeader, cacheBypassStatus)
+		}
 		m.next.ServeHTTP(w, r)
 		return
 	}
 
-	cs := cacheMissStatus
+	cacheStatus := cacheMissStatus
 
 	key := cacheKey(r, m.cfg.QueryInKey)
 
 	// First check: Try to serve from cache (non-blocking read)
 	cached, err := m.cache.GetStream(key)
 	if err == nil {
-		defer cached.Body.Close()
-
-		// Write headers
-		for key, vals := range cached.Metadata.Headers {
-			for _, val := range vals {
-				w.Header().Add(key, val)
-			}
-		}
-		if m.cfg.AddStatusHeader {
-			w.Header().Set(cacheHeader, cacheHitStatus)
-		}
-
-		// Write status
-		w.WriteHeader(cached.Metadata.Status)
-
-		// Stream body using pooled buffer to reduce allocations
-		buf := copyBufferPool.Get().(*[]byte)
-		_, _ = io.CopyBuffer(w, cached.Body, *buf)
-		copyBufferPool.Put(buf)
+		m.serveCachedResponse(w, cached, cacheHitStatus)
 		return
 	}
+	cacheStatus = cacheStatusFromLookupError(err)
 
 	// Cache miss - use double-checked locking via update intent
 	// Try to claim responsibility for fetching this resource
@@ -148,27 +137,10 @@ func (m *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// Wait completed successfully - try cache again now that they're done
 			cached, err := m.cache.GetStream(key)
 			if err == nil {
-				defer cached.Body.Close()
-
-				// Write headers
-				for key, vals := range cached.Metadata.Headers {
-					for _, val := range vals {
-						w.Header().Add(key, val)
-					}
-				}
-				if m.cfg.AddStatusHeader {
-					w.Header().Set(cacheHeader, cacheHitStatus)
-				}
-
-				// Write status
-				w.WriteHeader(cached.Metadata.Status)
-
-				// Stream body using pooled buffer to reduce allocations
-				buf := copyBufferPool.Get().(*[]byte)
-				_, _ = io.CopyBuffer(w, cached.Body, *buf)
-				copyBufferPool.Put(buf)
+				m.serveCachedResponse(w, cached, cacheUpdatingStatus)
 				return
 			}
+			cacheStatus = cacheStatusFromLookupError(err)
 		} else {
 			// Timeout waiting - other request may be hung/slow
 			// Fall through to fetch ourselves, but first try to claim the intent
@@ -186,7 +158,7 @@ func (m *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Cache miss - proceed with backend request
 	// Set cache status header before backend call so it's included in response
 	if m.cfg.AddStatusHeader {
-		w.Header().Set(cacheHeader, cs)
+		w.Header().Set(cacheHeader, cacheStatus)
 	}
 
 	rw := &responseWriter{
@@ -196,6 +168,7 @@ func (m *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		request:        r,
 		config:         m.cfg,
 		checkCacheable: m.cacheable,
+		cacheStatus:    cacheStatus,
 	}
 
 	// Ensure finalize is called to commit or abort cache write
@@ -215,6 +188,38 @@ func (m *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	m.next.ServeHTTP(rw, r)
+}
+
+func (m *cache) serveCachedResponse(w http.ResponseWriter, cached *cachedResponse, cacheStatus string) {
+	defer cached.Body.Close()
+
+	for key, vals := range cached.Metadata.Headers {
+		for _, val := range vals {
+			w.Header().Add(key, val)
+		}
+	}
+	if m.cfg.AddStatusHeader {
+		w.Header().Set(cacheHeader, cacheStatus)
+	}
+
+	w.WriteHeader(cached.Metadata.Status)
+
+	buf := copyBufferPool.Get().(*[]byte)
+	_, _ = io.CopyBuffer(w, cached.Body, *buf)
+	copyBufferPool.Put(buf)
+}
+
+func cacheStatusFromLookupError(err error) string {
+	switch {
+	case err == nil:
+		return cacheHitStatus
+	case errors.Is(err, errCacheExpired):
+		return cacheExpiredStatus
+	case errors.Is(err, errCacheMiss):
+		return cacheMissStatus
+	default:
+		return cacheErrorStatus
+	}
 }
 
 func (m *cache) cacheable(r *http.Request, w http.ResponseWriter, status int) (time.Duration, bool) {
@@ -299,6 +304,7 @@ type responseWriter struct {
 	wasCached     bool
 	cacheWriter   *streamingCacheWriter
 	writeErr      error // Track if any write errors occurred
+	cacheStatus   string
 }
 
 func (rw *responseWriter) Header() http.Header {
@@ -314,6 +320,9 @@ func (rw *responseWriter) WriteHeader(s int) {
 
 	// Make cache decision now that we have status and headers
 	expiry, cacheable := rw.checkCacheable(rw.request, rw.ResponseWriter, s)
+	if !cacheable && rw.cacheStatus == cacheMissStatus {
+		rw.setCacheStatus(cacheBypassStatus)
+	}
 
 	if cacheable {
 		// Strip Set-Cookie headers if configured (affects both cache and response)
@@ -333,6 +342,7 @@ func (rw *responseWriter) WriteHeader(s int) {
 			// errCacheWriteInProgress means another request beat us to it
 			// That's fine - they'll populate the cache, we just stream from upstream
 			if !errors.Is(err, errCacheWriteInProgress) {
+				rw.setCacheStatus(cacheErrorStatus)
 				log.Printf("Error starting cache write: %v", err)
 			}
 		} else {
@@ -341,6 +351,13 @@ func (rw *responseWriter) WriteHeader(s int) {
 	}
 
 	rw.ResponseWriter.WriteHeader(s)
+}
+
+func (rw *responseWriter) setCacheStatus(status string) {
+	rw.cacheStatus = status
+	if rw.config.AddStatusHeader {
+		rw.ResponseWriter.Header().Set(cacheHeader, status)
+	}
 }
 
 func (rw *responseWriter) Write(p []byte) (int, error) {

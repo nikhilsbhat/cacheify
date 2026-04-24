@@ -69,7 +69,14 @@ The number of seconds to wait between cache cleanup runs.
 *Default: true*
 
 This determines if the cache status header `Cache-Status` will be added to the
-response headers. This header can have the value `hit`, `miss` or `error`.
+response headers. This header can have the value:
+
+* `hit`: response served directly from cache
+* `miss`: no cache entry was available, so the response came from upstream
+* `bypass`: request/response was intentionally not cached
+* `expired`: an expired cache entry existed and the response was refetched
+* `updating`: another request populated the cache and this request reused that result
+* `error`: cache lookup/write failed and the response fell back to upstream
 
 #### Include Query Parameters in Cache Key (`queryInKey`)
 *Default: true*

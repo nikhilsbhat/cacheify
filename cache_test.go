@@ -126,8 +126,7 @@ func TestCache_WebSocketUpgradeBypass(t *testing.T) {
 		t.Error("upgrade request was not passed through: next handler did not receive the original ResponseWriter")
 	}
 
-	// No Cache-Status header should be set for upgrade requests
-	if state := rw.Header().Get("Cache-Status"); state != "" {
+	if state := rw.Header().Get("Cache-Status"); state != cacheBypassStatus {
 		t.Errorf("unexpected Cache-Status header on upgrade request: %q", state)
 	}
 
@@ -323,6 +322,38 @@ func TestCache_NoCacheControl(t *testing.T) {
 	}
 }
 
+func TestCache_BypassStatus(t *testing.T) {
+	dir := createTempDir(t)
+
+	next := func(rw http.ResponseWriter, req *http.Request) {
+		rw.Header().Set("Cache-Control", "no-store")
+		rw.WriteHeader(http.StatusOK)
+	}
+
+	cfg := &Config{Path: dir, MaxExpiry: 10, Cleanup: 20, AddStatusHeader: true, MaxHeaderPairs: 4, MaxHeaderKeyLen: 30, MaxHeaderValueLen: 100}
+
+	c, err := New(context.Background(), http.HandlerFunc(next), cfg, "cacheify")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://localhost/no-store", nil)
+	rw := httptest.NewRecorder()
+
+	c.ServeHTTP(rw, req)
+
+	if state := rw.Header().Get("Cache-Status"); state != cacheBypassStatus {
+		t.Errorf("unexpected cache state: want %q, got %q", cacheBypassStatus, state)
+	}
+
+	rw2 := httptest.NewRecorder()
+	c.ServeHTTP(rw2, req)
+
+	if state := rw2.Header().Get("Cache-Status"); state != cacheBypassStatus {
+		t.Errorf("unexpected cache state on second request: want %q, got %q", cacheBypassStatus, state)
+	}
+}
+
 // failingResponseWriter simulates a downstream client that fails after writing N bytes
 type failingResponseWriter struct {
 	http.ResponseWriter
@@ -428,19 +459,22 @@ func TestCache_DoubleCheckedLocking(t *testing.T) {
 	// Count cache hits vs misses
 	hits := 0
 	misses := 0
+	updating := 0
 	for _, status := range results {
 		if status == "hit" {
 			hits++
+		} else if status == cacheUpdatingStatus {
+			updating++
 		} else if status == "miss" {
 			misses++
 		}
 	}
 
-	t.Logf("Results: %d hits, %d misses", hits, misses)
+	t.Logf("Results: %d hits, %d updating, %d misses", hits, updating, misses)
 
-	// We should have at least some cache hits
-	if hits == 0 {
-		t.Error("Expected at least some cache hits from double-checked locking")
+	// We should have at least some cache-served responses beyond the original miss.
+	if hits+updating == 0 {
+		t.Error("Expected at least some cache-served responses from double-checked locking")
 	}
 }
 
@@ -609,6 +643,86 @@ func TestCache_EmptyBodyCached(t *testing.T) {
 	}
 
 	verifyNoTempFiles(t, dir)
+}
+
+func TestCache_ExpiredStatus(t *testing.T) {
+	dir := createTempDir(t)
+
+	var calls int32
+	next := func(rw http.ResponseWriter, req *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		rw.Header().Set("Cache-Control", "max-age=1")
+		rw.WriteHeader(http.StatusOK)
+		_, _ = rw.Write([]byte("response body"))
+	}
+
+	cfg := &Config{
+		Path:              dir,
+		MaxExpiry:         10,
+		Cleanup:           20,
+		AddStatusHeader:   true,
+		MaxHeaderPairs:    4,
+		MaxHeaderKeyLen:   30,
+		MaxHeaderValueLen: 100,
+	}
+
+	c, err := New(context.Background(), http.HandlerFunc(next), cfg, "cacheify")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://localhost/expired", nil)
+
+	rw1 := httptest.NewRecorder()
+	c.ServeHTTP(rw1, req)
+	if state := rw1.Header().Get("Cache-Status"); state != cacheMissStatus {
+		t.Fatalf("first request: expected %q, got %q", cacheMissStatus, state)
+	}
+
+	time.Sleep(1100 * time.Millisecond)
+
+	rw2 := httptest.NewRecorder()
+	c.ServeHTTP(rw2, req)
+	if state := rw2.Header().Get("Cache-Status"); state != cacheExpiredStatus {
+		t.Fatalf("second request: expected %q, got %q", cacheExpiredStatus, state)
+	}
+
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Fatalf("expected expired entry to be refetched upstream, got %d upstream calls", got)
+	}
+}
+
+func TestCache_ErrorStatusWhenCacheWriteCannotStart(t *testing.T) {
+	dir := createTempDir(t)
+
+	next := func(rw http.ResponseWriter, req *http.Request) {
+		rw.Header().Set("Cache-Control", "max-age=20")
+		rw.Header().Set("X-One", "1")
+		rw.WriteHeader(http.StatusOK)
+	}
+
+	cfg := &Config{
+		Path:              dir,
+		MaxExpiry:         10,
+		Cleanup:           20,
+		AddStatusHeader:   true,
+		MaxHeaderPairs:    2,
+		MaxHeaderKeyLen:   30,
+		MaxHeaderValueLen: 100,
+	}
+
+	c, err := New(context.Background(), http.HandlerFunc(next), cfg, "cacheify")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://localhost/header-overflow", nil)
+	rw := httptest.NewRecorder()
+	c.ServeHTTP(rw, req)
+
+	if state := rw.Header().Get("Cache-Status"); state != cacheErrorStatus {
+		t.Fatalf("expected %q when cache write fails, got %q", cacheErrorStatus, state)
+	}
 }
 
 func TestCache_ContextCancelledNotCached(t *testing.T) {

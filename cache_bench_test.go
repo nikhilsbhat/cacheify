@@ -100,8 +100,8 @@ func BenchmarkCacheHit(b *testing.B) {
 		if w.Code != http.StatusOK {
 			b.Fatalf("Expected status 200, got %d", w.Code)
 		}
-		if w.Header().Get("Cache-Status") != "hit" {
-			b.Fatalf("Expected cache hit, got %s", w.Header().Get("Cache-Status"))
+		if w.Header().Get(cacheHeader) != cacheHitStatus {
+			b.Fatalf("Expected cache hit, got %s", w.Header().Get(cacheHeader))
 		}
 	}
 }

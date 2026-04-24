@@ -19,6 +19,7 @@ import (
 )
 
 var errCacheMiss = errors.New("cache miss")
+var errCacheExpired = errors.New("cache expired")
 var errCacheWriteInProgress = errors.New("cache write in progress")
 
 // bufferPool pools 4KB bufio.Writer buffers to reduce allocations
@@ -388,8 +389,7 @@ func (c *fileCache) GetStream(key string) (*cachedResponse, error) {
 	if expires.Before(time.Now()) {
 		mu.RUnlock(c.lm)
 		_ = file.Close()
-		_ = os.Remove(p)
-		return nil, errCacheMiss
+		return nil, errCacheExpired
 	}
 
 	// Read metadata length (4 bytes)
