@@ -9,16 +9,16 @@ builds:
   - skip: true
 
 archives:
-  - format: 'tar.gz'
-    id: source-code
-  - format: 'zip'
-    id: source-code-2
+  - format_overrides:
+      - formats:
+          - 'tar.gz'
+          - 'zip'
 
 checksum:
   name_template: 'checksums.txt'
 
 snapshot:
-  name_template: "{{ .Tag }}"
+  version_template: "{{ .Tag }}"
 
 changelog:
   sort: asc
