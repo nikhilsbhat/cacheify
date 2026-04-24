@@ -18,16 +18,16 @@ import (
 
 // Config configures the middleware.
 type Config struct {
-	Path                 string `json:"path" yaml:"path" toml:"path"`
-	MaxExpiry            int    `json:"maxExpiry" yaml:"maxExpiry" toml:"maxExpiry"`
-	Cleanup              int    `json:"cleanup" yaml:"cleanup" toml:"cleanup"`
-	AddStatusHeader      bool   `json:"addStatusHeader" yaml:"addStatusHeader" toml:"addStatusHeader"`
-	QueryInKey           bool   `json:"queryInKey" yaml:"queryInKey" toml:"queryInKey"`
-	StripResponseCookies bool   `json:"stripResponseCookies" yaml:"stripResponseCookies" toml:"stripResponseCookies"`
-	MaxHeaderPairs       int    `json:"maxHeaderPairs" yaml:"maxHeaderPairs" toml:"maxHeaderPairs"`
-	MaxHeaderKeyLen      int    `json:"maxHeaderKeyLen" yaml:"maxHeaderKeyLen" toml:"maxHeaderKeyLen"`
-	MaxHeaderValueLen    int    `json:"maxHeaderValueLen" yaml:"maxHeaderValueLen" toml:"maxHeaderValueLen"`
-	UpdateTimeout        int    `json:"updateTimeout" yaml:"updateTimeout" toml:"updateTimeout"` // Seconds to wait for another request to complete cache update
+	Path                 string `json:"path,omitempty"                 yaml:"path,omitempty"                 toml:"path"`
+	MaxExpiry            int    `json:"maxExpiry,omitempty"            yaml:"maxExpiry,omitempty"            toml:"maxExpiry"`
+	Cleanup              int    `json:"cleanup,omitempty"              yaml:"cleanup,omitempty"              toml:"cleanup"`
+	AddStatusHeader      bool   `json:"addStatusHeader,omitempty"      yaml:"addStatusHeader,omitempty"      toml:"addStatusHeader"`
+	QueryInKey           bool   `json:"queryInKey,omitempty"           yaml:"queryInKey,omitempty"           toml:"queryInKey"`
+	StripResponseCookies bool   `json:"stripResponseCookies,omitempty" yaml:"stripResponseCookies,omitempty" toml:"stripResponseCookies"`
+	MaxHeaderPairs       int    `json:"maxHeaderPairs,omitempty"       yaml:"maxHeaderPairs,omitempty"       toml:"maxHeaderPairs"`
+	MaxHeaderKeyLen      int    `json:"maxHeaderKeyLen,omitempty"      yaml:"maxHeaderKeyLen,omitempty"      toml:"maxHeaderKeyLen"`
+	MaxHeaderValueLen    int    `json:"maxHeaderValueLen,omitempty"    yaml:"maxHeaderValueLen,omitempty"    toml:"maxHeaderValueLen"`
+	UpdateTimeout        int    `json:"updateTimeout,omitempty"        yaml:"updateTimeout,omitempty"        toml:"updateTimeout"` // Seconds to wait for another request to complete cache update
 }
 
 // CreateConfig returns a config instance.
