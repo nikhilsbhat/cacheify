@@ -37,8 +37,18 @@ func TestNew(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "should error if maxSize is invalid",
+			cfg:     &Config{Path: os.TempDir(), MaxExpiry: 300, Cleanup: 600, MaxSize: "ten gigs"},
+			wantErr: true,
+		},
+		{
 			name:    "should be valid",
 			cfg:     &Config{Path: os.TempDir(), MaxExpiry: 300, Cleanup: 600},
+			wantErr: false,
+		},
+		{
+			name:    "should be valid with maxSize",
+			cfg:     &Config{Path: os.TempDir(), MaxExpiry: 300, Cleanup: 600, MaxSize: "10g"},
 			wantErr: false,
 		},
 	}
@@ -49,6 +59,42 @@ func TestNew(t *testing.T) {
 
 			if test.wantErr && err == nil {
 				t.Fatal("expected error on bad regexp format")
+			}
+		})
+	}
+}
+
+func TestParseMaxSizeBytes(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    int64
+		wantErr bool
+	}{
+		{name: "empty is disabled", input: "", want: 0},
+		{name: "bytes", input: "1024", want: 1024},
+		{name: "kilobytes", input: "10k", want: 10 * 1024},
+		{name: "megabytes", input: "5m", want: 5 * 1024 * 1024},
+		{name: "gigabytes", input: "2G", want: 2 * 1024 * 1024 * 1024},
+		{name: "with b suffix", input: "1gb", want: 1 << 30},
+		{name: "invalid", input: "12xb", wantErr: true},
+		{name: "negative", input: "-1", wantErr: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := parseMaxSizeBytes(test.input)
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != test.want {
+				t.Fatalf("unexpected size: want %d, got %d", test.want, got)
 			}
 		})
 	}

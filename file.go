@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -178,6 +179,7 @@ type cachedResponse struct {
 type fileCache struct {
 	path              string
 	lm                *lockManager
+	maxSizeBytes      int64
 	maxHeaderPairs    int
 	maxHeaderKeyLen   int
 	maxHeaderValueLen int
@@ -193,7 +195,7 @@ type updateIntent struct {
 	done chan struct{} // Closed when update completes, signals all waiters
 }
 
-func newFileCache(path string, vacuum time.Duration, maxHeaderPairs, maxHeaderKeyLen, maxHeaderValueLen int) (*fileCache, error) {
+func newFileCache(path string, vacuum time.Duration, maxSizeBytes int64, maxHeaderPairs, maxHeaderKeyLen, maxHeaderValueLen int) (*fileCache, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("invalid cache path: %w", err)
@@ -206,6 +208,7 @@ func newFileCache(path string, vacuum time.Duration, maxHeaderPairs, maxHeaderKe
 	fc := &fileCache{
 		path:              path,
 		lm:                newLockManager(),
+		maxSizeBytes:      maxSizeBytes,
 		maxHeaderPairs:    maxHeaderPairs,
 		maxHeaderKeyLen:   maxHeaderKeyLen,
 		maxHeaderValueLen: maxHeaderValueLen,
@@ -216,6 +219,7 @@ func newFileCache(path string, vacuum time.Duration, maxHeaderPairs, maxHeaderKe
 	// Clean up any orphaned temp files from previous crashes/restarts
 	// This runs synchronously on startup to ensure clean state
 	fc.cleanupTempFiles()
+	fc.cleanupExpiredFiles()
 
 	go fc.vacuum(vacuum)
 
@@ -238,6 +242,17 @@ func (c *fileCache) vacuum(interval time.Duration) {
 
 // cleanupExpiredFiles removes expired cache files and aged temp files
 func (c *fileCache) cleanupExpiredFiles() {
+	type cacheFile struct {
+		path    string
+		size    int64
+		modTime time.Time
+	}
+
+	var (
+		totalSize int64
+		files     []cacheFile
+	)
+
 	_ = filepath.Walk(c.path, func(path string, info os.FileInfo, err error) error {
 		switch {
 		case err != nil:
@@ -279,6 +294,14 @@ func (c *fileCache) cleanupExpiredFiles() {
 		expires := time.Unix(int64(binary.LittleEndian.Uint64(t[:])), 0)
 		if !expires.Before(time.Now()) {
 			mu.Unlock(c.lm)
+			if c.maxSizeBytes > 0 {
+				totalSize += info.Size()
+				files = append(files, cacheFile{
+					path:    path,
+					size:    info.Size(),
+					modTime: info.ModTime(),
+				})
+			}
 			return nil
 		}
 
@@ -287,6 +310,28 @@ func (c *fileCache) cleanupExpiredFiles() {
 		mu.Unlock(c.lm)
 		return nil
 	})
+
+	if c.maxSizeBytes <= 0 || totalSize <= c.maxSizeBytes {
+		return
+	}
+
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].modTime.Equal(files[j].modTime) {
+			return files[i].path < files[j].path
+		}
+		return files[i].modTime.Before(files[j].modTime)
+	})
+
+	for _, file := range files {
+		if totalSize <= c.maxSizeBytes {
+			return
+		}
+
+		if err := os.Remove(file.path); err != nil && !os.IsNotExist(err) {
+			continue
+		}
+		totalSize -= file.size
+	}
 }
 
 // Stop gracefully stops the vacuum goroutine

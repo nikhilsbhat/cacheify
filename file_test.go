@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -17,7 +18,7 @@ const testCacheKey = "GETlocalhost:8080/test/path"
 func TestFileCache(t *testing.T) {
 	dir := createTempDir(t)
 
-	fc, err := newFileCache(dir, time.Second, 255, 100, 8192)
+	fc, err := newFileCache(dir, time.Second, 0, 255, 100, 8192)
 	if err != nil {
 		t.Errorf("unexpected newFileCache error: %v", err)
 	}
@@ -69,7 +70,7 @@ func TestFileCache(t *testing.T) {
 func TestFileCache_ExpiredEntry(t *testing.T) {
 	dir := createTempDir(t)
 
-	fc, err := newFileCache(dir, time.Second, 255, 100, 8192)
+	fc, err := newFileCache(dir, time.Second, 0, 255, 100, 8192)
 	if err != nil {
 		t.Fatalf("unexpected newFileCache error: %v", err)
 	}
@@ -115,6 +116,71 @@ func TestFileCache_ExpiredEntry(t *testing.T) {
 	}
 }
 
+func TestFileCache_MaxSizeEvictsOldestEntries(t *testing.T) {
+	dir := createTempDir(t)
+
+	fc, err := newFileCache(dir, time.Minute, 0, 255, 100, 8192)
+	if err != nil {
+		t.Fatalf("unexpected newFileCache error: %v", err)
+	}
+	defer fc.Stop()
+
+	metadata := cacheMetadata{
+		Status: 200,
+		Headers: map[string][]string{
+			"Content-Type": {"text/plain"},
+		},
+	}
+
+	keys := []string{
+		"GETlocalhost:8080/size/oldest",
+		"GETlocalhost:8080/size/middle",
+		"GETlocalhost:8080/size/newest",
+	}
+	sizes := make([]int64, len(keys))
+
+	for i, key := range keys {
+		writer, err := fc.SetStream(key, metadata, time.Hour)
+		if err != nil {
+			t.Fatalf("unexpected SetStream error for %q: %v", key, err)
+		}
+		body := bytes.Repeat([]byte{byte('a' + i)}, 128)
+		if _, err := writer.Write(body); err != nil {
+			t.Fatalf("unexpected write error for %q: %v", key, err)
+		}
+		if err := writer.Commit(); err != nil {
+			t.Fatalf("unexpected commit error for %q: %v", key, err)
+		}
+
+		path := keyPath(dir, key)
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("unexpected stat error for %q: %v", key, err)
+		}
+		sizes[i] = info.Size()
+
+		modTime := time.Now().Add(time.Duration(i-len(keys)) * time.Minute)
+		if err := os.Chtimes(path, modTime, modTime); err != nil {
+			t.Fatalf("unexpected chtimes error for %q: %v", key, err)
+		}
+	}
+
+	fc.maxSizeBytes = sizes[1] + sizes[2]
+	fc.cleanupExpiredFiles()
+
+	if _, err := fc.GetStream(keys[0]); err != errCacheMiss {
+		t.Fatalf("expected oldest entry to be evicted, got %v", err)
+	}
+
+	for _, key := range keys[1:] {
+		resp, err := fc.GetStream(key)
+		if err != nil {
+			t.Fatalf("expected %q to remain cached, got %v", key, err)
+		}
+		resp.Body.Close()
+	}
+}
+
 func TestFileCache_ConcurrentAccess(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -127,7 +193,7 @@ func TestFileCache_ConcurrentAccess(t *testing.T) {
 
 	dir := createTempDir(t)
 
-	fc, err := newFileCache(dir, time.Second, 255, 100, 8192)
+	fc, err := newFileCache(dir, time.Second, 0, 255, 100, 8192)
 	if err != nil {
 		t.Errorf("unexpected newFileCache error: %v", err)
 	}
@@ -242,7 +308,7 @@ func TestLockManager_NoLeakAfterSetStreamCommit(t *testing.T) {
 
 	dir := createTempDir(t)
 
-	fc, err := newFileCache(dir, time.Minute, 255, 100, 8192)
+	fc, err := newFileCache(dir, time.Minute, 0, 255, 100, 8192)
 	if err != nil {
 		t.Fatalf("unexpected newFileCache error: %v", err)
 	}
@@ -283,7 +349,7 @@ func TestLockManager_NoLeakAfterSetStreamCommit(t *testing.T) {
 func TestLockManager_NoLeakAfterSetStreamAbort(t *testing.T) {
 	dir := createTempDir(t)
 
-	fc, err := newFileCache(dir, time.Minute, 255, 100, 8192)
+	fc, err := newFileCache(dir, time.Minute, 0, 255, 100, 8192)
 	if err != nil {
 		t.Fatalf("unexpected newFileCache error: %v", err)
 	}
@@ -328,7 +394,7 @@ func TestLockManager_NoLeakAfterGetStream(t *testing.T) {
 
 	dir := createTempDir(t)
 
-	fc, err := newFileCache(dir, time.Minute, 255, 100, 8192)
+	fc, err := newFileCache(dir, time.Minute, 0, 255, 100, 8192)
 	if err != nil {
 		t.Fatalf("unexpected newFileCache error: %v", err)
 	}
@@ -378,7 +444,7 @@ func TestLockManager_NoLeakAfterGetStream(t *testing.T) {
 func BenchmarkFileCache_Get(b *testing.B) {
 	dir := createTempDir(b)
 
-	fc, err := newFileCache(dir, time.Minute, 255, 100, 8192)
+	fc, err := newFileCache(dir, time.Minute, 0, 255, 100, 8192)
 	if err != nil {
 		b.Errorf("unexpected newFileCache error: %v", err)
 	}

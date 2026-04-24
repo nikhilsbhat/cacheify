@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ type Config struct {
 	Path                 string `json:"path,omitempty"                 yaml:"path,omitempty"                 toml:"path"`
 	MaxExpiry            int    `json:"maxExpiry,omitempty"            yaml:"maxExpiry,omitempty"            toml:"maxExpiry"`
 	Cleanup              int    `json:"cleanup,omitempty"              yaml:"cleanup,omitempty"              toml:"cleanup"`
+	MaxSize              string `json:"maxSize,omitempty"              yaml:"maxSize,omitempty"              toml:"maxSize"`
 	AddStatusHeader      bool   `json:"addStatusHeader,omitempty"      yaml:"addStatusHeader,omitempty"      toml:"addStatusHeader"`
 	QueryInKey           bool   `json:"queryInKey,omitempty"           yaml:"queryInKey,omitempty"           toml:"queryInKey"`
 	StripResponseCookies bool   `json:"stripResponseCookies,omitempty" yaml:"stripResponseCookies,omitempty" toml:"stripResponseCookies"`
@@ -72,9 +74,15 @@ func New(_ context.Context, next http.Handler, cfg *Config, name string) (http.H
 		return nil, errors.New("cleanup must be greater or equal to 1")
 	}
 
+	maxSizeBytes, err := parseMaxSizeBytes(cfg.MaxSize)
+	if err != nil {
+		return nil, err
+	}
+
 	fc, err := newFileCache(
 		cfg.Path,
 		time.Duration(cfg.Cleanup)*time.Second,
+		maxSizeBytes,
 		cfg.MaxHeaderPairs,
 		cfg.MaxHeaderKeyLen,
 		cfg.MaxHeaderValueLen,
@@ -220,6 +228,47 @@ func cacheStatusFromLookupError(err error) string {
 	default:
 		return cacheErrorStatus
 	}
+}
+
+func parseMaxSizeBytes(value string) (int64, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, nil
+	}
+
+	lower := strings.ToLower(value)
+	multiplier := int64(1)
+
+	for _, suffix := range []struct {
+		suffix     string
+		multiplier int64
+	}{
+		{suffix: "tb", multiplier: 1 << 40},
+		{suffix: "t", multiplier: 1 << 40},
+		{suffix: "gb", multiplier: 1 << 30},
+		{suffix: "g", multiplier: 1 << 30},
+		{suffix: "mb", multiplier: 1 << 20},
+		{suffix: "m", multiplier: 1 << 20},
+		{suffix: "kb", multiplier: 1 << 10},
+		{suffix: "k", multiplier: 1 << 10},
+		{suffix: "b", multiplier: 1},
+	} {
+		if strings.HasSuffix(lower, suffix.suffix) {
+			multiplier = suffix.multiplier
+			lower = strings.TrimSpace(strings.TrimSuffix(lower, suffix.suffix))
+			break
+		}
+	}
+
+	size, err := strconv.ParseInt(lower, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid maxSize %q", value)
+	}
+	if size < 0 {
+		return 0, errors.New("maxSize must be greater or equal to 0")
+	}
+
+	return size * multiplier, nil
 }
 
 func (m *cache) cacheable(r *http.Request, w http.ResponseWriter, status int) (time.Duration, bool) {

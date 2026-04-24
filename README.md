@@ -33,6 +33,7 @@ Dynamic:
 [http.middlewares]
   [http.middlewares.my-cache.plugin.cache]
     path = "/some/path/to/cache/dir"
+    maxSize = "10g"
 ```
 
 ```yaml
@@ -42,6 +43,7 @@ http:
       plugin:
         cache:
           path: /some/path/to/cache/dir
+          maxSize: 10g
 ```
 
 ### Options
@@ -63,6 +65,16 @@ actual cache time will always be lower or equal to this.
 *Default: 600*
 
 The number of seconds to wait between cache cleanup runs.
+
+#### Max Size (`maxSize`)
+
+*Default: unset*
+
+An optional disk usage limit for the cache, using nginx-style size suffixes like
+`10g`, `500m`, `128k`, or raw bytes such as `1048576`. When set, cacheify will
+evict the oldest cache files during its cleanup pass until the total cache size
+falls back under the limit. If omitted or set to `0`, size-based eviction is
+disabled.
 	
 #### Add Status Header (`addStatusHeader`)
 
