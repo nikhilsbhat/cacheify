@@ -5,15 +5,15 @@ services:
       - "--api.insecure=true"
       - "--providers.docker=true"
       - "--entrypoints.web.address=:80"
-      #- "--experimental.plugins.cacheify.moduleName=github.com/ciaranj/cacheify"
+      #- "--experimental.plugins.cacheify.moduleName=github.com/nikhilsbhat/cacheify"
       #- "--experimental.plugins.cacheify.version=v0.0.7"
-      - "--experimental.localPlugins.cacheify.modulename=github.com/ciaranj/cacheify"
+      - "--experimental.localPlugins.cacheify.modulename=github.com/nikhilsbhat/cacheify"
     ports:
       - "80:80"
       - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - .:/plugins-local/src/github.com/ciaranj/cacheify
+      - .:/plugins-local/src/github.com/nikhilsbhat/cacheify
       
   whoami:
     image: traefik/whoami

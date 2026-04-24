@@ -1,5 +1,7 @@
 # Cacheify
 
+[![shields](https://godoc.org/github.com/nikhilsbhat/cacheify?status.svg)](https://godoc.org/github.com/nikhilsbhat/cacheify)
+
 Simple cache plugin middleware caches responses on disk.
 
 Based on the original plugin-simplecache, but with some significant performance improvements
@@ -23,7 +25,7 @@ Static:
 
 ```toml
 [experimental.plugins.cache]
-  modulename = "github.com/ciaranj/cacheify"
+  modulename = "github.com/nikhilsbhat/cacheify"
   version = "v0.0.1"
 ```
 
