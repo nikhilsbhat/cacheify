@@ -19,9 +19,11 @@ import (
 	"time"
 )
 
-var errCacheMiss = errors.New("cache miss")
-var errCacheExpired = errors.New("cache expired")
-var errCacheWriteInProgress = errors.New("cache write in progress")
+var (
+	errCacheMiss            = errors.New("cache miss")
+	errCacheExpired         = errors.New("cache expired")
+	errCacheWriteInProgress = errors.New("cache write in progress")
+)
 
 // bufferPool pools 4KB bufio.Writer buffers to reduce allocations
 var bufferPool = sync.Pool{
@@ -606,7 +608,7 @@ func (c *fileCache) SetStream(key string, metadata cacheMetadata, expiry time.Du
 	p := keyPath(c.path, key)
 
 	// Create directory structure
-	if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		mu.Unlock(c.lm)
 		return nil, fmt.Errorf("error creating file path: %w", err)
 	}
@@ -622,7 +624,7 @@ func (c *fileCache) SetStream(key string, metadata cacheMetadata, expiry time.Du
 	// This prevents partial writes from ever being visible as valid cache entries
 	// Format: {final-path}.tmp.{random}
 	tempPath := p + ".tmp." + randomSuffix()
-	file, err := os.OpenFile(filepath.Clean(tempPath), os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+	file, err := os.OpenFile(filepath.Clean(tempPath), os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		mu.Unlock(c.lm)
 		return nil, fmt.Errorf("error creating temp cache file: %w", err)
@@ -686,6 +688,7 @@ func keyHash(key string) [32]byte {
 // randomSuffix generates a random suffix for temporary files
 func randomSuffix() string {
 	var buf [8]byte
+
 	_, _ = rand.Read(buf[:])
 	return hex.EncodeToString(buf[:])
 }
@@ -717,7 +720,9 @@ func keyPath(path, key string) string {
 
 	// Get pooled buffer for hex encoding (avoids allocation)
 	bufPtr := hexBufferPool.Get().(*[]byte)
+
 	defer hexBufferPool.Put(bufPtr)
+
 	hexBuf := *bufPtr
 	hex.Encode(hexBuf, h[:])
 

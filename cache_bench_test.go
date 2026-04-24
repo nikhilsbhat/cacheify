@@ -233,7 +233,7 @@ func BenchmarkFileIO(b *testing.B) {
 
 			for i := 0; i < b.N; i++ {
 				path := filepath.Join(tmpDir, fmt.Sprintf("file-%d", i))
-				err := os.WriteFile(path, data, 0600)
+				err := os.WriteFile(path, data, 0o600)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -244,7 +244,7 @@ func BenchmarkFileIO(b *testing.B) {
 			tmpDir := b.TempDir()
 			data := make([]byte, size)
 			path := filepath.Join(tmpDir, "file")
-			err := os.WriteFile(path, data, 0600)
+			err := os.WriteFile(path, data, 0o600)
 			if err != nil {
 				b.Fatal(err)
 			}

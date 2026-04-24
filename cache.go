@@ -342,6 +342,7 @@ func cacheKey(r *http.Request, includeQuery bool) string {
 
 type responseWriter struct {
 	http.ResponseWriter
+
 	cache          *fileCache
 	cacheKey       string
 	request        *http.Request
@@ -386,6 +387,7 @@ func (rw *responseWriter) WriteHeader(s int) {
 		}
 
 		var err error
+
 		rw.cacheWriter, err = rw.cache.SetStream(rw.cacheKey, metadata, expiry)
 		if err != nil {
 			// errCacheWriteInProgress means another request beat us to it

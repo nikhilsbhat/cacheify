@@ -607,10 +607,10 @@ func TestCache_StartupCleansUpTempFiles(t *testing.T) {
 	tempFile1 := filepath.Join(dir, "fakehash.tmp.1234567890abcdef")
 	tempFile2 := filepath.Join(dir, "anotherhash.tmp.fedcba0987654321")
 
-	if err := os.WriteFile(tempFile1, []byte("orphaned temp data"), 0600); err != nil {
+	if err := os.WriteFile(tempFile1, []byte("orphaned temp data"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(tempFile2, []byte("more orphaned data"), 0600); err != nil {
+	if err := os.WriteFile(tempFile2, []byte("more orphaned data"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -855,7 +855,6 @@ func verifyNoTempFiles(t *testing.T, dir string) {
 		}
 		return nil
 	})
-
 	if err != nil {
 		t.Fatalf("Error walking cache directory: %v", err)
 	}
